@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for EC2 instances, RDS, ALB, and Lambda functions'
+
+Parameters:
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Password for RDS database
+    MinLength: 8
+    ConstraintDescription: Must be at least 8 characters
+
+Resources:
+  # Bastion Host in Public Subnet
+  BastionHost:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: 'ami-0953476d60561c955'  # Your specified AMI
+      InstanceType: 't2.micro'
+      SecurityGroupIds:
+        - 'sg-08e5ec2eba579f918'  # bastion_security_group_id
+      SubnetId: 'subnet-052c267e072b8a2cf'  # public_subnet_1_id
+      KeyName: 'mykey'
+      Tags:
+        - Key: Name
+          Value: bastion-host
+
+  # Web Application Server in Private Subnet
+  WebServerInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: 'ami-0953476d60561c955'  # Your specified AMI
+      InstanceType: 't2.micro'
+      SecurityGroupIds:
+        - 'sg-00595c492b15a45bb'  # web_security_group_id
+      SubnetId: 'subnet-0ee15382af24b3bcb'  # private_subnet_1_id
+      KeyName: 'mykey'
+      Tags:
+        - Key: Name
+          Value: web-server
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: 'Subnet group for RDS instance'
+      SubnetIds:
+        - 'subnet-0ee15382af24b3bcb'  # private_subnet_1_id
+        - 'subnet-01d3df3b126a8bb0a'  # private_subnet_2_id
+      Tags:
+        - Key: Name
+          Value: db-subnet-group
+
+  # RDS Instance (in private subnet)
+  RDSInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: 20
+      DBInstanceClass: 'db.t3.micro'
+      DBName: 'projectdb'
+      Engine: 'mysql'
+      EngineVersion: '8.0'
+      MasterUsername: 'admin'
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: false
+      StorageType: 'gp2'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - 'sg-0687de5677a1790b6'  # db_security_group_id
+      Tags:
+        - Key: Name
+          Value: project-db
+
+  # Application Load Balancer (in public subnets across two AZs)
+  ApplicationLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: web-alb
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - 'sg-0047f057fa0ae357e'  # alb_security_group_id
+      Subnets:
+        - 'subnet-052c267e072b8a2cf'  # public_subnet_1_id
+        - 'subnet-07a3fcfc6fbee1ca0'  # public_subnet_2_id
+      Tags:
+        - Key: Name
+          Value: web-alb
+
+  # ALB Target Group
+  ALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: web-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: 'vpc-0235f5ea6483aa4a8'  # vpc_id
+      HealthCheckPath: '/'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetType: instance
+      Targets:
+        - Id: !Ref WebServerInstance
+          Port: 80
+      Tags:
+        - Key: Name
+          Value: web-tg
+
+  # ALB Listener
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # S3 Bucket
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub 'project-bucket-${AWS::AccountId}'
+      Tags:
+        - Key: Name
+          Value: project-bucket
+
+  # IAM Role for Lambda
+  BasicLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  # Basic Lambda Function
+  BasicLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: basic-function
+      Handler: index.handler
+      Role: !GetAtt BasicLambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 10
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              print('Basic Lambda function executed successfully')
+              return {
+                  'statusCode': 200,
+                  'body': 'Basic Lambda function executed successfully'
+              }
+      Tags:
+        - Key: Name
+          Value: basic-lambda-function
+
+Outputs:
+  BastionHostId:
+    Description: ID of the bastion host
+    Value: !Ref BastionHost
+  
+  BastionHostPublicIP:
+    Description: Public IP of the bastion host
+    Value: !GetAtt BastionHost.PublicIp
+  
+  WebServerInstanceId:
+    Description: ID of the web server instance
+    Value: !Ref WebServerInstance
+  
+  WebServerInstancePrivateIP:
+    Description: Private IP of the web server instance
+    Value: !GetAtt WebServerInstance.PrivateIp
+  
+  ALBDNSName:
+    Description: DNS Name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  
+  RDSEndpoint:
+    Description: Endpoint of the RDS instance
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  
+  DBName:
+    Description: Name of the database
+    Value: 'projectdb'
+  
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref S3Bucket
+  
+  BasicLambdaFunctionName:
+    Description: Name of the basic Lambda function
+    Value: !Ref BasicLambdaFunction
