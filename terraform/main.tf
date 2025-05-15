@@ -137,7 +137,7 @@ resource "aws_route_table_association" "private_2" {
   route_table_id = aws_route_table.private.id
 }
 
-# Bastion Host Security Group
+#Bastion Host Security Group
 resource "aws_security_group" "bastion" {
   name        = "bastion-sg"
   description = "Security group for bastion host"
