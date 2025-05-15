@@ -1,4 +1,3 @@
-AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation template for EC2 instances, RDS, ALB, and Lambda functions'
 
 Parameters:
@@ -28,7 +27,7 @@ Resources:
   WebServerInstance:
     Type: 'AWS::EC2::Instance'
     Properties:
-      ImageId: 'ami-0953476d60561c955'  # Your specified AMI
+      ImageId: 'ami-0953476d60561c955'  
       InstanceType: 't2.micro'
       SecurityGroupIds:
         - 'sg-00595c492b15a45bb'  # web_security_group_id
